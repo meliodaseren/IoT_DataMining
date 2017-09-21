@@ -1,0 +1,169 @@
+---
+title: "IoT Data Mining Notebook"
+output: html_notebook
+---
+
+## 簡單回歸模型
+
+```{r}
+x <- c(3,3,4,3,6,8,8,9)       # 藥劑量
+y <- c(22,25,18,20,16,9,12,5) # 感冒痊癒天數
+
+New_x <- data.frame(x = 5)
+
+# 建立一個線性迴歸模型
+Train <- data.frame(x = x, y = y)
+lmTrain <- lm(formula = y ~ x, data = Train)
+predicted <- predict(lmTrain , newdata = New_x)
+# 預測當x=5時的痊癒天數
+
+
+# 模型摘要
+summary(lmTrain )
+
+# 作圖
+plot(y ~ x , main = "依藥劑量預測痊癒天數", xlab = "藥劑量", ylab = "感冒痊癒天數")
+points(x = New_x, y = predicted, col = "green", cex = 2, pch = 16)
+abline(reg = lmTrain$coefficients, col = "red", lwd = 1)  # 繪製輔助線
+
+summary(lmTrain)
+```
+
+由標準化的自變數所計算而得到的迴歸係數，我們稱為β(beta)係數，擁有β係數愈高的自變數(Xn)，對依變數(Y)的影響力愈大。
+
+Estimate b0, b1
+y = 29.8043 - 2.5326 * x
+
+預測當 x = 5 時的痊癒天數
+y = 29.8043 - 2.5326 * 5
+
+判定係數R(值域在0和1之間)，越接近1表示模型預測力越好
+Adjusted R-squared:  0.8995
+
+```{r}
+# 自行產生藥劑量、平均每日睡眠時間與感冒痊癒天數資料
+x1 <- c(3,3,4,3,6,8,8,9)      # 藥劑量
+x2 <- c(3,1,6,4,9,10,8,11)    # 平均每日睡眠時數
+y <- c(22,25,18,20,16,9,12,5) # 感冒痊癒天數
+
+# 新患者資料
+New_x1 <- 5 # 預測當x=5時的痊癒天數
+New_x2 <- 7 # 每日睡眠時數
+New_data <- data.frame(x1 = 5, x2 = 7)
+
+# 建立一個線性迴歸模型
+Train <- data.frame(x1 = x1, x2 = x2, y = y)
+lmTrain <- lm(formula = y ~ ., data = Train)
+
+#預測新患者感冒痊癒天數
+predicted <- predict(lmTrain, newdata = New_data)
+predicted     
+
+summary(lmTrain )
+```
+
+
+## RJDBC
+https://blog.stranity.com.tw/2017/03/13/r-%E5%88%86%E6%9E%90-sql-%E8%B3%87%E6%96%99%E5%BA%AB%E7%9A%84%E5%B0%8F%E6%8A%80%E5%B7%A7/
+
+```{r}
+# install.packages("RJDBC")
+library(RJDBC)
+
+# 設定連線
+drv <- JDBC("com.mysql.jdbc.Driver", "C:\\mysql-connector-java-5.1.43-bin.jar")
+
+# DB name: test123, login id: root, login password: tony, 預設port 3306
+conn <- dbConnect(drv,
+                  "jdbc:mysql://172.104.90.53:3306/iii",
+                  "iii",
+                  "iii@WSX1qaz"
+)
+
+# mysql> show tables
+dbListTables(conn)
+
+# 執行SQL語法，儲存結果於a
+a <- dbGetQuery(conn, "select * from airquality ")
+
+# a會是一個data.frame的格式
+class(a)
+
+# 回寫資料
+data(iris)
+iris_test <- iris
+
+# 更改欄位名稱
+names(iris_test) <- c('S_L','S_W','P_L','P_W','Species')
+
+# 寫入MySql
+dbWriteTable(conn, "iris_test", iris_test)
+
+dbListTables(conn)
+
+# 刪除Table
+dbRemoveTable(conn, " iris_test ")
+
+# 結束連線
+dbDisconnect(conn)
+```
+
+```{r}
+# install.packages("RJDBC")
+library(RJDBC)
+
+# 設定連線
+drv <- JDBC("com.mysql.jdbc.Driver", "C:\\mysql-connector-java-5.1.43-bin.jar")
+
+# DB name: test123, login id: root, login password: tony, 預設port 3306
+conn <- dbConnect(drv,
+                  "jdbc:mysql://172.104.90.53:3306/iii",
+                  "iii",
+                  "iii@WSX1qaz"
+)
+
+sensor <- dbGetQuery(conn, "SELECT * FROM sensor")
+airquality <- dbGetQuery(conn, "SELECT * FROM airquality")
+
+
+# install.packages("sqldf")
+library(sqldf)
+
+# 將sensor收集的資料整理成月,日,當日平均溫度,當日平均濕度，
+# 然後透過月、日與airquality作資料勾稽(Left join)
+df_sensor <- sqldf("SELECT CAST(SUBSTR(trim(dt),7,1) as int) month,
+                   CAST(SUBSTR(trim(dt),9,2) as int) day,
+                   AVG(temperature) avg_temperature,
+                   AVG(humidity) avg_humidity
+                   FROM sensor
+                   GROUP BY
+                       CAST(SUBSTR(trim(dt),7,1) AS int),
+                       CAST(SUBSTR(trim(dt),9,2) AS int)
+                   HAVING CAST(SUBSTR(trim(dt),7,1) AS int) <>0 ")
+
+
+df_allitems <- sqldf("SELECT a.*, b.avg_temperature, b.avg_humidity
+                      FROM airquality a
+                      LEFT JOIN df_sensor b
+                      ON a.Month = b.month AND a.Day = b.day
+")
+
+# 建置多元迴歸模型
+lmTrain <- lm(formula = Ozone ~ Solar_R+Wind+avg_temperature+avg_humidity,
+              data = subset(df_allitems, complete.cases(df_allitems))) #排除null
+
+summary(lmTrain )
+
+New_data <- data.frame(Solar_R =200, Wind=12, avg_temperature=32.1, avg_humidity =62.7)
+
+predicted <- predict(lmTrain , newdata = New_data)
+predicted/1000
+
+# 結束連線
+dbDisconnect(conn)
+```
+
+
+
+
+
